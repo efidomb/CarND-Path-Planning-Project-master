@@ -8,7 +8,6 @@
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
-// #include "Eigen-3.3/Eigen/Splines"
 #include "spline.h"
 
 using namespace std;
@@ -26,6 +25,11 @@ int lane_width = 4;
 int lane = 1;
 double ref_vel = 0.0;
 double keep_distance = 30.0;
+bool consider_shift = false;
+bool right_lane_clear = true;
+bool left_lane_clear = true;
+double max_acceleration = 1.5;
+double max_speed = 48.0;
 
 
 // Checks if the SocketIO event has JSON data.
@@ -250,6 +254,10 @@ int main() {
 
           	int prev_size = previous_path_x.size();
 
+            right_lane_clear = true;
+            left_lane_clear = true;
+            consider_shift = false;
+
           	/**********************/
 
           	if (prev_size > 0){
@@ -263,37 +271,59 @@ int main() {
 
           		float d = sensor_fusion[i][6];
               
+              double vx = sensor_fusion[i][3];
+              double vy = sensor_fusion[i][4];
+              double check_speed = sqrt(vx * vx + vy * vy);
+              double check_car_s = sensor_fusion[i][5];
 
+              check_car_s += (double)prev_size * 0.02 * check_speed;
+              double far_away = check_car_s - car_s;
+              
           		if (d < lane_width * (lane + 1) && d > lane_width * lane){
-          			double vx = sensor_fusion[i][3];
-          			double vy = sensor_fusion[i][4];
-          			double check_speed = sqrt(vx * vx + vy * vy);
-          			double check_car_s = sensor_fusion[i][5];
-
-          			check_car_s += (double)prev_size * 0.02 * check_speed;
-
-          			if ((check_car_s > car_s) && ((check_car_s - car_s) < keep_distance)){
-                  std::cout << "check_speed: " << check_speed << std::endl;
-                  std::cout << "my_speed: " << ref_vel << std::endl;
-                  std::cout << "distance: " << check_car_s - car_s << std::endl;
+          			if (check_car_s > car_s && far_away < keep_distance){
                   too_close = true;
-                  front_car_speed = check_speed;
-                  // if (lane > 0){
-                  //   lane = 0;
-                  // }
-                  // ref_vel = check_speed;
           			}
 
-          			// I'M HERE. MINUTE 45:17 IN THE VIDEO
           		}
-          	}
 
-            if (too_close){
-              ref_vel -= abs(ref_vel - front_car_speed) * 0.1;
+              if (check_car_s > car_s - 10 && far_away < keep_distance){
+                if (lane_width * (lane - 1) < d && d < lane_width * lane){
+                  left_lane_clear = false;
+                }
+                if (lane_width * (lane + 1) < d && d < lane_width * (lane + 2)){
+                  right_lane_clear = false;
+                }
+              }
             }
 
-            else if (ref_vel < 49.0){
-              ref_vel += 1;
+            if (too_close){
+
+              if (lane == 0){
+                left_lane_clear = false;
+              }
+              if (lane == 2){
+                right_lane_clear = false;
+              }
+
+
+              if (left_lane_clear){
+                lane += 1;
+              }
+              else if (right_lane_clear){
+                lane -= 1;
+              }
+
+              else {
+                double deceleration = abs(ref_vel - front_car_speed) * 0.1;
+                if (deceleration > max_acceleration){
+                  deceleration = max_acceleration;
+                }
+                ref_vel -= deceleration;
+              }
+            }
+
+            else if (ref_vel < max_speed){
+              ref_vel += max_acceleration;
             }
 
           	/**********************/
